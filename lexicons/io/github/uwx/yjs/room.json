@@ -1,0 +1,36 @@
+{
+  "lexicon": 1,
+  "id": "io.github.uwx.yjs.room",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "When this room was created"
+          },
+          "encrypted": {
+            "type": "boolean",
+            "description": "Whether this room is encrypted"
+          },
+          "authorizedDids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "did"
+            },
+            "description": "If set, an allowlist of DIDs that are allowed to send updates to this room"
+          }
+        },
+        "required": [
+          "createdAt",
+          "encrypted"
+        ]
+      }
+    }
+  }
+}

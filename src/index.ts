@@ -1,0 +1,428 @@
+import {
+    applyUpdateV2,
+    mergeUpdatesV2,
+    encodeStateAsUpdateV2,
+    type Doc,
+} from "yjs";
+import { ObservableV2 } from "lib0/observable";
+import {
+    ConstellationClient,
+    getDidAndPds,
+    KittyAgent,
+    resolveHandleAnonymously,
+    SlingshotClient,
+} from "kitty-agent";
+import { IoGithubUwxYjsRoom, IoGithubUwxYjsUpdate } from "./lexicons/index.js";
+import {
+    parseResourceUri,
+    type ActorIdentifier,
+    type Did,
+    type RecordKey,
+    type ResourceUri,
+} from "@atcute/lexicons";
+import { JetstreamSubscription } from "@atcute/jetstream";
+import { is } from "@atcute/lexicons";
+import { fromUint8Array, toUint8Array } from "js-base64";
+import type { FetchHandler, FetchHandlerObject } from "@atcute/client";
+import { now as tidNow, parse as parseTid } from "@atcute/tid";
+import { isLegacyBlob } from "@atcute/lexicons/interfaces";
+import { decrypt, deriveKey, encrypt } from "./crypto.js";
+
+const constellation = new ConstellationClient({
+    userAgent: "y-atproto/1.0.0",
+});
+
+const slingshot = new SlingshotClient({
+    userAgent: "y-atproto/1.0.0",
+});
+
+async function getUpdateData(
+    actor: ActorIdentifier,
+    record: IoGithubUwxYjsUpdate.Main,
+) {
+    if (record.update.$type == "io.github.uwx.yjs.update#blobUpdateData") {
+        const { did, pds } = await getDidAndPds(actor);
+        const agent = KittyAgent.createUnauthed(pds);
+        const cid = isLegacyBlob(record.update.blob)
+            ? record.update.blob.cid
+            : record.update.blob.ref.$link;
+        const blobData = await agent.getBlobAsBinary({
+            cid,
+            did,
+        });
+
+        return blobData;
+    } else if (
+        record.update.$type == "io.github.uwx.yjs.update#bytesUpdateData"
+    ) {
+        return toUint8Array(record.update.bytes.$bytes);
+    }
+
+    throw new Error("Unknown update type");
+}
+
+/**
+ * Accumulates all updates for a room from the atmosphere and returns them as a single merged update.
+ * @param room
+ */
+async function getStateForResume(
+    room: ResourceUri,
+    authorizedDids?: Did[],
+): Promise<Uint8Array> {
+    // read through all backlinks for the room up until either the first update or any full update.
+    // if we find a full update, we walk back a little bit further to get a few extra updates with similar timestamps,
+    // to make sure we get the full update regardless of race conditions.
+
+    const iter = constellation.getAllBacklinks({
+        subject: room,
+        source: "io.github.uwx.yjs.update:room",
+    });
+
+    const updateBuffer: Uint8Array[] = [];
+
+    let dateCutoff: Date | undefined = undefined;
+
+    for await (const link of iter) {
+        // TID is in microseconds
+        const time = new Date(parseTid(link.rkey).timestamp / 1_000);
+
+        if (authorizedDids != null && !authorizedDids.includes(link.did)) {
+            continue; // skip updates from unauthorized DIDs
+        }
+
+        if (dateCutoff != null) {
+            if (time < dateCutoff) {
+                // we've found enough updates
+                break;
+            }
+        }
+
+        const { value: record } = await slingshot.tryGetRecord({
+            collection: "io.github.uwx.yjs.update",
+            rkey: link.rkey,
+            repo: link.did,
+        });
+
+        if (record == null) {
+            continue; // skip deleted records. hopefully this won't lead to broken document state.
+        }
+
+        if (dateCutoff == null && record.isFullUpdate) {
+            // we've found a full update, let's set a date cutoff for a few seconds in the past
+            // and load those few updates.
+            dateCutoff = new Date(time.getTime() - 1000);
+        }
+
+        updateBuffer.push(await getUpdateData(link.did, record));
+    }
+
+    return mergeUpdatesV2(updateBuffer);
+}
+
+export default class AtprotoProvider extends ObservableV2<{
+    sync(hasQueued: boolean): void;
+}> {
+    readonly ydoc: Doc;
+    readonly resendAllUpdates: boolean;
+    readonly queuedYjsUpdates: Uint8Array[];
+    readonly autosaveLoop: number;
+    readonly jetstream: JetstreamSubscription;
+    readonly room: ResourceUri;
+    readonly agent: KittyAgent;
+    readonly repo: ActorIdentifier;
+    stopped = false;
+    readonly fullUpdateRate: number;
+    readonly key: CryptoKey | undefined;
+
+    private constructor({
+        key,
+        fullUpdateRate,
+        state,
+        repo,
+        handler,
+        room,
+        record,
+        jetstreamService,
+        ydoc,
+        autosaveInterval,
+        resendAllUpdates,
+    }: {
+        key?: CryptoKey;
+        state?: Uint8Array;
+        repo: ActorIdentifier;
+        handler: FetchHandler | FetchHandlerObject;
+        room: `at://${ActorIdentifier}/io.github.uwx.yjs.room/${RecordKey}`;
+        record: IoGithubUwxYjsRoom.Main;
+        jetstreamService?: string;
+        ydoc: Doc;
+        autosaveInterval: number;
+        resendAllUpdates?: boolean;
+        fullUpdateRate?: number;
+    }) {
+        super();
+
+        this.repo = repo;
+        this.agent = new KittyAgent({ handler });
+        this.room = room;
+        this.ydoc = ydoc;
+        this.resendAllUpdates = resendAllUpdates ?? false;
+        this.fullUpdateRate = fullUpdateRate ?? 0.1;
+        this.key = key;
+
+        if (state != null) {
+            applyUpdateV2(this.ydoc, state, this.ydoc.clientID);
+        }
+
+        // queued yjs-updates, to be flushed and sent out in syncToChatPeers()
+        this.queuedYjsUpdates = [];
+
+        const jetstream = (this.jetstream = new JetstreamSubscription({
+            url: jetstreamService ?? "wss://jetstream2.us-east.bsky.network",
+            wantedCollections: ["io.github.uwx.yjs.update"],
+        }));
+
+        (async () => {
+            for await (const event of jetstream) {
+                if (this.stopped) {
+                    break;
+                }
+
+                if (event.kind === "commit") {
+                    const commit = event.commit;
+
+                    if (commit.collection !== "io.github.uwx.yjs.update") {
+                        continue;
+                    }
+
+                    if (
+                        record.authorizedDids != null &&
+                        !record.authorizedDids.includes(event.did)
+                    ) {
+                        continue;
+                    }
+
+                    if (commit.operation === "update") {
+                        const updateRecord = commit.record;
+                        if (!is(IoGithubUwxYjsRoom.mainSchema, updateRecord)) {
+                            continue;
+                        }
+                    }
+
+                    if (commit.operation === "create") {
+                        const record = commit.record;
+                        if (!is(IoGithubUwxYjsUpdate.mainSchema, record)) {
+                            continue;
+                        }
+
+                        await this.receiveJetstreamUpdate(
+                            await getUpdateData(event.did, record),
+                        );
+                    }
+                }
+            }
+        })();
+
+        ydoc.on("updateV2", (yjsupdate, origin) =>
+            this.receiveYjsUpdate(yjsupdate, origin),
+        );
+        this.autosaveLoop = setInterval(
+            () => this.syncToChatPeers(),
+            autosaveInterval,
+        );
+    }
+
+    close() {
+        this.syncToChatPeers(true);
+        this.stopped = true;
+        clearInterval(this.autosaveLoop);
+    }
+
+    static async createNew({
+        secret,
+        repo,
+        handler,
+        ydoc,
+        autosaveInterval,
+        resendAllUpdates,
+        fullUpdateRate,
+    }: {
+        secret?: string;
+        repo: ActorIdentifier;
+        handler: FetchHandler | FetchHandlerObject;
+        ydoc: Doc;
+        getEditInfo: Function;
+        autosaveInterval: number;
+        resendAllUpdates?: boolean;
+        fullUpdateRate?: number;
+    }) {
+        const rkey = tidNow();
+        const room =
+            `at://${repo}/io.github.uwx.yjs.room/${rkey}` as `at://${ActorIdentifier}/io.github.uwx.yjs.room/${RecordKey}`;
+
+        const agent = new KittyAgent({ handler });
+
+        const record = {
+            $type: "io.github.uwx.yjs.room",
+            authorizedDids: [],
+            createdAt: new Date().toISOString(),
+            encrypted: secret != null,
+        } satisfies IoGithubUwxYjsRoom.Main;
+        agent.create({
+            collection: "io.github.uwx.yjs.room",
+            record,
+            rkey,
+            repo,
+        });
+
+        const provider = new AtprotoProvider({
+            key: secret != null ? await deriveKey(secret, room) : undefined,
+            ydoc,
+            room,
+            record,
+            handler,
+            repo,
+            fullUpdateRate,
+            autosaveInterval,
+            resendAllUpdates,
+        });
+
+        provider.syncToChatPeers(true);
+
+        return {
+            provider,
+            room,
+        };
+    }
+
+    static async resume({
+        secret,
+        repo,
+        handler,
+        room,
+        ydoc,
+        autosaveInterval,
+        resendAllUpdates,
+        fullUpdateRate,
+    }: {
+        secret?: string;
+        repo: ActorIdentifier;
+        handler: FetchHandler | FetchHandlerObject;
+        room: `at://${ActorIdentifier}/io.github.uwx.yjs.room/${RecordKey}`;
+        ydoc: Doc;
+        getEditInfo: Function;
+        autosaveInterval: number;
+        resendAllUpdates?: boolean;
+        fullUpdateRate?: number;
+    }) {
+        const parsedUri = parseResourceUri(room);
+        if (!parsedUri.ok) {
+            throw new Error(`Invalid room URI: ${room}`);
+        }
+
+        const record = await slingshot.getRecord({
+            collection: "io.github.uwx.yjs.room",
+            rkey: parsedUri.value.rkey as RecordKey,
+            repo: parsedUri.value.repo as ActorIdentifier,
+        });
+
+        // resolve DID from handle so when we derive the key it's immutable
+        room = `at://${await resolveHandleAnonymously(parsedUri.value.repo)}/io.github.uwx.yjs.room/${parsedUri.value.rkey}`;
+
+        const state = await getStateForResume(
+            room,
+            record.value.authorizedDids,
+        );
+
+        return new AtprotoProvider({
+            key: secret != null ? await deriveKey(secret, room) : undefined,
+            ydoc,
+            room,
+            record: record.value,
+            handler,
+            repo,
+            fullUpdateRate,
+            autosaveInterval,
+            resendAllUpdates,
+            state,
+        });
+    }
+
+    async syncToChatPeers(fullUpdate = false) {
+        if (this.queuedYjsUpdates.length <= 0) {
+            return;
+        }
+
+        let mergedYjsUpdate;
+
+        const doFullUpdate =
+            fullUpdate ||
+            this.resendAllUpdates ||
+            Math.random() < this.fullUpdateRate;
+        if (doFullUpdate) {
+            mergedYjsUpdate = encodeStateAsUpdateV2(this.ydoc);
+        } else {
+            mergedYjsUpdate = mergeUpdatesV2(this.queuedYjsUpdates);
+        }
+
+        if (this.key != null) {
+            mergedYjsUpdate = await encrypt(mergedYjsUpdate, this.key);
+        }
+
+        // record max length is 1MiB, so we cutoff at 1MB and send a blob instead
+        if (mergedYjsUpdate.length > 1_000_000) {
+            const blob = await this.agent.uploadBlob(mergedYjsUpdate);
+
+            await this.agent.put({
+                collection: "io.github.uwx.yjs.update",
+                record: {
+                    $type: "io.github.uwx.yjs.update",
+                    room: this.room,
+                    update: {
+                        $type: "io.github.uwx.yjs.update#blobUpdateData",
+                        blob,
+                    },
+                    isFullUpdate: doFullUpdate,
+                },
+                rkey: tidNow(),
+                repo: this.repo,
+            });
+        } else {
+            await this.agent.put({
+                collection: "io.github.uwx.yjs.update",
+                record: {
+                    $type: "io.github.uwx.yjs.update",
+                    room: this.room,
+                    update: {
+                        $type: "io.github.uwx.yjs.update#bytesUpdateData",
+                        bytes: {
+                            $bytes: fromUint8Array(mergedYjsUpdate),
+                        },
+                    },
+                    isFullUpdate: doFullUpdate,
+                },
+                rkey: tidNow(),
+                repo: this.repo,
+            });
+        }
+        this.queuedYjsUpdates.length = 0;
+        this.emit("sync", [false]);
+    }
+
+    async receiveJetstreamUpdate(update: Uint8Array) {
+        if (this.key != null) {
+            update = await decrypt(update, this.key);
+        }
+
+        applyUpdateV2(this.ydoc, update, this.ydoc.clientID);
+    }
+
+    receiveYjsUpdate(yjsUpdate: Uint8Array, origin: any) {
+        if (origin === this.ydoc.clientID) {
+            return;
+        }
+
+        this.queuedYjsUpdates.push(yjsUpdate);
+
+        this.emit("sync", [true]);
+    }
+}

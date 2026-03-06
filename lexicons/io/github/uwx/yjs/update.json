@@ -1,0 +1,61 @@
+{
+  "lexicon": 1,
+  "id": "io.github.uwx.yjs.update",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "properties": {
+          "room": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "The room this update belongs to"
+          },
+          "update": {
+            "type": "union",
+            "refs": [
+              "#bytesUpdateData",
+              "#blobUpdateData"
+            ],
+            "description": "The update data from Y.js"
+          },
+          "isFullUpdate": {
+            "type": "boolean",
+            "description": "Whether this update is a full update (all changes) or a partial update (only changes since last full update)"
+          }
+        },
+        "required": [
+          "room",
+          "update",
+          "isFullUpdate"
+        ]
+      }
+    },
+    "bytesUpdateData": {
+      "type": "object",
+      "properties": {
+        "bytes": {
+          "type": "bytes"
+        }
+      },
+      "description": "The update data from Y.js as bytes",
+      "required": [
+        "bytes"
+      ]
+    },
+    "blobUpdateData": {
+      "type": "object",
+      "properties": {
+        "blob": {
+          "type": "blob"
+        }
+      },
+      "description": "The update data from Y.js as a blob",
+      "required": [
+        "blob"
+      ]
+    }
+  }
+}
