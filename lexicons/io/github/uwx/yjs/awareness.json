@@ -1,0 +1,29 @@
+{
+  "lexicon": 1,
+  "id": "io.github.uwx.yjs.awareness",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "properties": {
+          "room": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "The room this awareness update belongs to"
+          },
+          "update": {
+            "type": "bytes",
+            "description": "The awareness data for this peer from Y.js"
+          }
+        },
+        "required": [
+          "room",
+          "update"
+        ]
+      },
+      "description": "An awareness update from a remote peer"
+    }
+  }
+}

@@ -30,7 +30,8 @@
           "createdAt",
           "encrypted"
         ]
-      }
+      },
+      "description": "A Y.js room declaration"
     }
   }
 }

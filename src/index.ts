@@ -12,7 +12,7 @@ import {
     resolveHandleAnonymously,
     SlingshotClient,
 } from "kitty-agent";
-import { IoGithubUwxYjsRoom, IoGithubUwxYjsUpdate } from "./lexicons/index.js";
+import { IoGithubUwxYjsAwareness, IoGithubUwxYjsRoom, IoGithubUwxYjsUpdate } from "./lexicons/index.js";
 import {
     parseResourceUri,
     type ActorIdentifier,
@@ -27,6 +27,7 @@ import type { FetchHandler, FetchHandlerObject } from "@atcute/client";
 import { now as tidNow, parse as parseTid } from "@atcute/tid";
 import { isLegacyBlob } from "@atcute/lexicons/interfaces";
 import { decrypt, deriveKey, encrypt } from "./crypto.js";
+import { applyAwarenessUpdate, Awareness, encodeAwarenessUpdate, outdatedTimeout } from 'y-protocols/awareness.js'
 
 const constellation = new ConstellationClient({
     userAgent: "y-atproto/1.0.0",
@@ -59,6 +60,50 @@ async function getUpdateData(
     }
 
     throw new Error("Unknown update type");
+}
+
+async function getAwarenessForResume(
+    room: ResourceUri,
+    authorizedDids?: Did[],
+): Promise<Uint8Array[]> {
+    // read through all backlinks newer than the last 30 seconds (the outdatedTimeout in y-protocols/awareness) for the room
+    // to be applied.
+
+    const iter = constellation.getAllBacklinks({
+        subject: room,
+        source: "io.github.uwx.yjs.awareness:room",
+        limit: 30,
+    });
+
+    const updateBuffer: Uint8Array[] = [];
+
+    for await (const link of iter) {
+        // TID is in microseconds
+        const time = new Date(parseTid(link.rkey).timestamp / 1_000);
+
+        if (authorizedDids != null && !authorizedDids.includes(link.did)) {
+            continue; // skip updates from unauthorized DIDs
+        }
+
+        if (time < new Date(Date.now() - outdatedTimeout)) {
+            // we've found enough updates
+            break;
+        }
+
+        const { value: record } = await slingshot.tryGetRecord({
+            collection: "io.github.uwx.yjs.awareness",
+            rkey: link.rkey,
+            repo: link.did,
+        });
+
+        if (record == null) {
+            continue; // skip deleted records. hopefully this won't lead to broken document state.
+        }
+
+        updateBuffer.push(toUint8Array(record.update.$bytes));
+    }
+
+    return updateBuffer;
 }
 
 /**
@@ -133,6 +178,8 @@ export default class AtprotoProvider extends ObservableV2<{
     stopped = false;
     readonly fullUpdateRate: number;
     readonly key: CryptoKey | undefined;
+    readonly awareness: Awareness;
+    readonly awarenessBroadcastLoop: number;
 
     private constructor({
         key,
@@ -146,6 +193,9 @@ export default class AtprotoProvider extends ObservableV2<{
         ydoc,
         autosaveInterval,
         resendAllUpdates,
+        awarenessBroadcastInterval,
+        awareness,
+        awarenessData,
     }: {
         key?: CryptoKey;
         state?: Uint8Array;
@@ -158,6 +208,9 @@ export default class AtprotoProvider extends ObservableV2<{
         autosaveInterval: number;
         resendAllUpdates?: boolean;
         fullUpdateRate?: number;
+        awarenessBroadcastInterval?: number;
+        awareness?: Awareness;
+        awarenessData?: Uint8Array[];
     }) {
         super();
 
@@ -168,9 +221,16 @@ export default class AtprotoProvider extends ObservableV2<{
         this.resendAllUpdates = resendAllUpdates ?? false;
         this.fullUpdateRate = fullUpdateRate ?? 0.1;
         this.key = key;
+        this.awareness = awareness ?? new Awareness(ydoc);
 
         if (state != null) {
-            applyUpdateV2(this.ydoc, state, this.ydoc.clientID);
+            applyUpdateV2(this.ydoc, state, 'atproto/constellation');
+        }
+
+        if (awarenessData != null) {
+            for (const data of awarenessData) {
+                applyAwarenessUpdate(this.awareness, data, 'atproto/constellation');
+            }
         }
 
         // queued yjs-updates, to be flushed and sent out in syncToChatPeers()
@@ -178,7 +238,7 @@ export default class AtprotoProvider extends ObservableV2<{
 
         const jetstream = (this.jetstream = new JetstreamSubscription({
             url: jetstreamService ?? "wss://jetstream2.us-east.bsky.network",
-            wantedCollections: ["io.github.uwx.yjs.update"],
+            wantedCollections: ["io.github.uwx.yjs.update", "io.github.uwx.yjs.room", "io.github.uwx.yjs.awareness"],
         }));
 
         (async () => {
@@ -190,18 +250,11 @@ export default class AtprotoProvider extends ObservableV2<{
                 if (event.kind === "commit") {
                     const commit = event.commit;
 
-                    if (commit.collection !== "io.github.uwx.yjs.update") {
-                        continue;
-                    }
-
-                    if (
-                        record.authorizedDids != null &&
-                        !record.authorizedDids.includes(event.did)
-                    ) {
-                        continue;
-                    }
-
                     if (commit.operation === "update") {
+                        if (commit.collection !== "io.github.uwx.yjs.room") {
+                            continue;
+                        }
+
                         const updateRecord = commit.record;
                         if (!is(IoGithubUwxYjsRoom.mainSchema, updateRecord)) {
                             continue;
@@ -209,14 +262,34 @@ export default class AtprotoProvider extends ObservableV2<{
                     }
 
                     if (commit.operation === "create") {
-                        const record = commit.record;
-                        if (!is(IoGithubUwxYjsUpdate.mainSchema, record)) {
+                        if (
+                            record.authorizedDids != null &&
+                            !record.authorizedDids.includes(event.did)
+                        ) {
                             continue;
                         }
 
-                        await this.receiveJetstreamUpdate(
-                            await getUpdateData(event.did, record),
-                        );
+                        if (commit.collection === "io.github.uwx.yjs.update") {
+                            const createRecord = commit.record;
+                            if (!is(IoGithubUwxYjsUpdate.mainSchema, createRecord)) {
+                                continue;
+                            }
+
+                            await this.receiveJetstreamUpdate(
+                                await getUpdateData(event.did, createRecord),
+                            );
+                        }
+
+                        if (commit.collection === "io.github.uwx.yjs.awareness") {
+                            const createRecord = commit.record;
+                            if (!is(IoGithubUwxYjsAwareness.mainSchema, createRecord)) {
+                                continue;
+                            }
+
+                            await this.receiveJetstreamAwarenessUpdate(
+                                toUint8Array(createRecord.update.$bytes),
+                            );
+                        }
                     }
                 }
             }
@@ -229,12 +302,18 @@ export default class AtprotoProvider extends ObservableV2<{
             () => this.syncToChatPeers(),
             autosaveInterval,
         );
+
+        this.awarenessBroadcastLoop = setInterval(
+            () => this.broadcastAwarenessUpdate(),
+            awarenessBroadcastInterval ?? 29_000,
+        );
     }
 
     close() {
         this.syncToChatPeers(true);
         this.stopped = true;
         clearInterval(this.autosaveLoop);
+        clearInterval(this.awarenessBroadcastLoop);
     }
 
     static async createNew({
@@ -245,6 +324,8 @@ export default class AtprotoProvider extends ObservableV2<{
         autosaveInterval,
         resendAllUpdates,
         fullUpdateRate,
+        awarenessBroadcastInterval,
+        awareness,
     }: {
         secret?: string;
         repo: ActorIdentifier;
@@ -254,6 +335,8 @@ export default class AtprotoProvider extends ObservableV2<{
         autosaveInterval: number;
         resendAllUpdates?: boolean;
         fullUpdateRate?: number;
+        awarenessBroadcastInterval?: number;
+        awareness?: Awareness;
     }) {
         const rkey = tidNow();
         const room =
@@ -284,6 +367,8 @@ export default class AtprotoProvider extends ObservableV2<{
             fullUpdateRate,
             autosaveInterval,
             resendAllUpdates,
+            awarenessBroadcastInterval,
+            awareness,
         });
 
         provider.syncToChatPeers(true);
@@ -303,6 +388,8 @@ export default class AtprotoProvider extends ObservableV2<{
         autosaveInterval,
         resendAllUpdates,
         fullUpdateRate,
+        awarenessBroadcastInterval,
+        awareness,
     }: {
         secret?: string;
         repo: ActorIdentifier;
@@ -313,6 +400,8 @@ export default class AtprotoProvider extends ObservableV2<{
         autosaveInterval: number;
         resendAllUpdates?: boolean;
         fullUpdateRate?: number;
+        awarenessBroadcastInterval?: number;
+        awareness?: Awareness;
     }) {
         const parsedUri = parseResourceUri(room);
         if (!parsedUri.ok) {
@@ -333,6 +422,11 @@ export default class AtprotoProvider extends ObservableV2<{
             record.value.authorizedDids,
         );
 
+        const awarenessData = await getAwarenessForResume(
+            room,
+            record.value.authorizedDids,
+        );
+
         return new AtprotoProvider({
             key: secret != null ? await deriveKey(secret, room) : undefined,
             ydoc,
@@ -344,6 +438,9 @@ export default class AtprotoProvider extends ObservableV2<{
             autosaveInterval,
             resendAllUpdates,
             state,
+            awarenessBroadcastInterval,
+            awareness,
+            awarenessData,
         });
     }
 
@@ -408,16 +505,37 @@ export default class AtprotoProvider extends ObservableV2<{
         this.emit("sync", [false]);
     }
 
+    async broadcastAwarenessUpdate() {
+        const data = encodeAwarenessUpdate(this.awareness, [this.awareness.clientID]);
+
+        await this.agent.put({
+            collection: "io.github.uwx.yjs.awareness",
+            record: {
+                $type: "io.github.uwx.yjs.awareness",
+                room: this.room,
+                update: {
+                    $bytes: fromUint8Array(data),
+                }
+            },
+            rkey: tidNow(),
+            repo: this.repo,
+        });
+    }
+
     async receiveJetstreamUpdate(update: Uint8Array) {
         if (this.key != null) {
             update = await decrypt(update, this.key);
         }
 
-        applyUpdateV2(this.ydoc, update, this.ydoc.clientID);
+        applyUpdateV2(this.ydoc, update, 'atproto/jetstream');
+    }
+
+    async receiveJetstreamAwarenessUpdate(data: Uint8Array<ArrayBufferLike>) {
+        applyAwarenessUpdate(this.awareness, data, 'atproto/jetstream');
     }
 
     receiveYjsUpdate(yjsUpdate: Uint8Array, origin: any) {
-        if (origin === this.ydoc.clientID) {
+        if (origin === 'atproto/jetstream') {
             return;
         }
 

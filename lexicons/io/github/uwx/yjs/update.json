@@ -31,7 +31,8 @@
           "update",
           "isFullUpdate"
         ]
-      }
+      },
+      "description": "A Y.js update from a remote peer"
     },
     "bytesUpdateData": {
       "type": "object",
