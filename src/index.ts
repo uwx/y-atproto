@@ -179,7 +179,7 @@ export default class AtprotoProvider extends ObservableV2<{
     readonly fullUpdateRate: number;
     readonly key: CryptoKey | undefined;
     readonly awareness: Awareness;
-    readonly awarenessBroadcastLoop: number;
+    readonly awarenessBroadcastLoop?: number;
 
     private constructor({
         key,
@@ -195,6 +195,7 @@ export default class AtprotoProvider extends ObservableV2<{
         resendAllUpdates,
         awarenessBroadcastInterval,
         awareness,
+        awarenessLive,
         awarenessData,
     }: {
         key?: CryptoKey;
@@ -210,6 +211,7 @@ export default class AtprotoProvider extends ObservableV2<{
         fullUpdateRate?: number;
         awarenessBroadcastInterval?: number;
         awareness?: Awareness;
+        awarenessLive?: boolean;
         awarenessData?: Uint8Array[];
     }) {
         super();
@@ -303,17 +305,26 @@ export default class AtprotoProvider extends ObservableV2<{
             autosaveInterval,
         );
 
-        this.awarenessBroadcastLoop = setInterval(
-            () => this.broadcastAwarenessUpdate(),
-            awarenessBroadcastInterval ?? 29_000,
-        );
+        if (!awarenessLive) {
+            this.awarenessBroadcastLoop = setInterval(
+                () => this.broadcastAwarenessUpdate(),
+                awarenessBroadcastInterval ?? 29_000,
+            );
+        } else {
+            this.awareness.on('change', ({ added, updated, removed }: { added: number[], updated: number[], removed: number[] }, origin: any) => {
+                if ((typeof origin !== 'string' || !origin.startsWith('atproto/')) &&
+                    (added.includes(this.awareness.clientID) || updated.includes(this.awareness.clientID) || removed.includes(this.awareness.clientID))) {
+                    this.broadcastAwarenessUpdate();
+                }
+            });
+        }
     }
 
     close() {
         this.syncToChatPeers(true);
         this.stopped = true;
         clearInterval(this.autosaveLoop);
-        clearInterval(this.awarenessBroadcastLoop);
+        if (this.awarenessBroadcastLoop != null) clearInterval(this.awarenessBroadcastLoop);
     }
 
     static async createNew({
@@ -326,6 +337,7 @@ export default class AtprotoProvider extends ObservableV2<{
         fullUpdateRate,
         awarenessBroadcastInterval,
         awareness,
+        awarenessLive,
     }: {
         secret?: string;
         repo: ActorIdentifier;
@@ -337,6 +349,7 @@ export default class AtprotoProvider extends ObservableV2<{
         fullUpdateRate?: number;
         awarenessBroadcastInterval?: number;
         awareness?: Awareness;
+        awarenessLive?: boolean;
     }) {
         const rkey = tidNow();
         const room =
@@ -369,6 +382,7 @@ export default class AtprotoProvider extends ObservableV2<{
             resendAllUpdates,
             awarenessBroadcastInterval,
             awareness,
+            awarenessLive,
         });
 
         provider.syncToChatPeers(true);
@@ -390,6 +404,7 @@ export default class AtprotoProvider extends ObservableV2<{
         fullUpdateRate,
         awarenessBroadcastInterval,
         awareness,
+        awarenessLive,
     }: {
         secret?: string;
         repo: ActorIdentifier;
@@ -402,6 +417,7 @@ export default class AtprotoProvider extends ObservableV2<{
         fullUpdateRate?: number;
         awarenessBroadcastInterval?: number;
         awareness?: Awareness;
+        awarenessLive?: boolean;
     }) {
         const parsedUri = parseResourceUri(room);
         if (!parsedUri.ok) {
@@ -441,6 +457,7 @@ export default class AtprotoProvider extends ObservableV2<{
             awarenessBroadcastInterval,
             awareness,
             awarenessData,
+            awarenessLive,
         });
     }
 
