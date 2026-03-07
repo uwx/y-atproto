@@ -28,6 +28,9 @@ import { now as tidNow, parse as parseTid } from "@atcute/tid";
 import { isLegacyBlob } from "@atcute/lexicons/interfaces";
 import { decrypt, deriveKey, encrypt } from "./crypto.js";
 import { applyAwarenessUpdate, Awareness, encodeAwarenessUpdate, outdatedTimeout } from 'y-protocols/awareness.js'
+import { createModuleLogger } from 'lib0/logging';
+
+const log = createModuleLogger('y-webrtc')
 
 const constellation = new ConstellationClient({
     userAgent: "y-atproto/1.0.0",
@@ -72,7 +75,6 @@ async function getAwarenessForResume(
     const iter = constellation.getAllBacklinks({
         subject: room,
         source: "io.github.uwx.yjs.awareness:room",
-        limit: 30,
     });
 
     const updateBuffer: Uint8Array[] = [];
@@ -113,6 +115,7 @@ async function getAwarenessForResume(
 async function getStateForResume(
     room: ResourceUri,
     authorizedDids?: Did[],
+    key?: CryptoKey,
 ): Promise<Uint8Array> {
     // read through all backlinks for the room up until either the first update or any full update.
     // if we find a full update, we walk back a little bit further to get a few extra updates with similar timestamps,
@@ -128,6 +131,8 @@ async function getStateForResume(
     let dateCutoff: Date | undefined = undefined;
 
     for await (const link of iter) {
+        log("Found update backlink", link);
+
         // TID is in microseconds
         const time = new Date(parseTid(link.rkey).timestamp / 1_000);
 
@@ -137,6 +142,7 @@ async function getStateForResume(
 
         if (dateCutoff != null) {
             if (time < dateCutoff) {
+                log("Skipping update because it's too old");
                 // we've found enough updates
                 break;
             }
@@ -155,10 +161,15 @@ async function getStateForResume(
         if (dateCutoff == null && record.isFullUpdate) {
             // we've found a full update, let's set a date cutoff for a few seconds in the past
             // and load those few updates.
-            dateCutoff = new Date(time.getTime() - 1000);
+            dateCutoff = new Date(time.getTime() - 15000);
+            log("Setting date cutoff to", dateCutoff);
         }
 
-        updateBuffer.push(await getUpdateData(link.did, record));
+        let data = await getUpdateData(link.did, record);
+        if (key != null) {
+            data = await decrypt(data, key);
+        }
+        updateBuffer.push(data);
     }
 
     return mergeUpdatesV2(updateBuffer);
@@ -201,7 +212,7 @@ export default class AtprotoProvider extends ObservableV2<{
         key?: CryptoKey;
         state?: Uint8Array;
         repo: ActorIdentifier;
-        handler: FetchHandler | FetchHandlerObject;
+        handler: FetchHandler | FetchHandlerObject | KittyAgent;
         room: `at://${ActorIdentifier}/io.github.uwx.yjs.room/${RecordKey}`;
         record: IoGithubUwxYjsRoom.Main;
         jetstreamService?: string;
@@ -217,13 +228,17 @@ export default class AtprotoProvider extends ObservableV2<{
         super();
 
         this.repo = repo;
-        this.agent = new KittyAgent({ handler });
+        this.agent = handler instanceof KittyAgent ? handler : new KittyAgent({ handler });
         this.room = room;
         this.ydoc = ydoc;
         this.resendAllUpdates = resendAllUpdates ?? false;
         this.fullUpdateRate = fullUpdateRate ?? 0.1;
         this.key = key;
         this.awareness = awareness ?? new Awareness(ydoc);
+
+        if (record.encrypted && this.key == null) {
+            throw new Error("Room is encrypted but no key was provided");
+        }
 
         if (state != null) {
             applyUpdateV2(this.ydoc, state, 'atproto/constellation');
@@ -272,6 +287,8 @@ export default class AtprotoProvider extends ObservableV2<{
                         }
 
                         if (commit.collection === "io.github.uwx.yjs.update") {
+                            log("Got update", commit);
+
                             const createRecord = commit.record;
                             if (!is(IoGithubUwxYjsUpdate.mainSchema, createRecord)) {
                                 continue;
@@ -283,6 +300,8 @@ export default class AtprotoProvider extends ObservableV2<{
                         }
 
                         if (commit.collection === "io.github.uwx.yjs.awareness") {
+                            log("Got awareness", commit);
+
                             const createRecord = commit.record;
                             if (!is(IoGithubUwxYjsAwareness.mainSchema, createRecord)) {
                                 continue;
@@ -320,7 +339,8 @@ export default class AtprotoProvider extends ObservableV2<{
         }
     }
 
-    close() {
+    destroy() {
+        super.destroy();
         this.syncToChatPeers(true);
         this.stopped = true;
         clearInterval(this.autosaveLoop);
@@ -341,9 +361,8 @@ export default class AtprotoProvider extends ObservableV2<{
     }: {
         secret?: string;
         repo: ActorIdentifier;
-        handler: FetchHandler | FetchHandlerObject;
+        handler: FetchHandler | FetchHandlerObject | KittyAgent;
         ydoc: Doc;
-        getEditInfo: Function;
         autosaveInterval: number;
         resendAllUpdates?: boolean;
         fullUpdateRate?: number;
@@ -355,11 +374,11 @@ export default class AtprotoProvider extends ObservableV2<{
         const room =
             `at://${repo}/io.github.uwx.yjs.room/${rkey}` as `at://${ActorIdentifier}/io.github.uwx.yjs.room/${RecordKey}`;
 
-        const agent = new KittyAgent({ handler });
+        const agent = handler instanceof KittyAgent ? handler : new KittyAgent({ handler });
 
         const record = {
             $type: "io.github.uwx.yjs.room",
-            authorizedDids: [],
+            authorizedDids: undefined, // we can set this to undefined to allow any DID, or set it to an array of DIDs to only allow those DIDs.
             createdAt: new Date().toISOString(),
             encrypted: secret != null,
         } satisfies IoGithubUwxYjsRoom.Main;
@@ -408,10 +427,9 @@ export default class AtprotoProvider extends ObservableV2<{
     }: {
         secret?: string;
         repo: ActorIdentifier;
-        handler: FetchHandler | FetchHandlerObject;
+        handler: FetchHandler | FetchHandlerObject | KittyAgent;
         room: `at://${ActorIdentifier}/io.github.uwx.yjs.room/${RecordKey}`;
         ydoc: Doc;
-        getEditInfo: Function;
         autosaveInterval: number;
         resendAllUpdates?: boolean;
         fullUpdateRate?: number;
@@ -433,9 +451,12 @@ export default class AtprotoProvider extends ObservableV2<{
         // resolve DID from handle so when we derive the key it's immutable
         room = `at://${await resolveHandleAnonymously(parsedUri.value.repo)}/io.github.uwx.yjs.room/${parsedUri.value.rkey}`;
 
+        const key = secret != null ? await deriveKey(secret, room) : undefined;
+
         const state = await getStateForResume(
             room,
             record.value.authorizedDids,
+            key,
         );
 
         const awarenessData = await getAwarenessForResume(
@@ -444,7 +465,7 @@ export default class AtprotoProvider extends ObservableV2<{
         );
 
         return new AtprotoProvider({
-            key: secret != null ? await deriveKey(secret, room) : undefined,
+            key,
             ydoc,
             room,
             record: record.value,
@@ -466,6 +487,8 @@ export default class AtprotoProvider extends ObservableV2<{
             return;
         }
 
+        log("Syncing to chat peers");
+
         let mergedYjsUpdate;
 
         const doFullUpdate =
@@ -477,6 +500,7 @@ export default class AtprotoProvider extends ObservableV2<{
         } else {
             mergedYjsUpdate = mergeUpdatesV2(this.queuedYjsUpdates);
         }
+        this.queuedYjsUpdates.length = 0;
 
         if (this.key != null) {
             mergedYjsUpdate = await encrypt(mergedYjsUpdate, this.key);
@@ -518,7 +542,6 @@ export default class AtprotoProvider extends ObservableV2<{
                 repo: this.repo,
             });
         }
-        this.queuedYjsUpdates.length = 0;
         this.emit("sync", [false]);
     }
 
