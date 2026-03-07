@@ -2,7 +2,7 @@
     "client_id": "https://y-atproto-demo-monaco.wisp.place/client-metadata.json",
     "client_name": "atpaste",
     "client_uri": "https://y-atproto-demo-monaco.wisp.place/",
-    "redirect_uris": ["https://y-atproto-demo-monaco.wisp.place/oauth/redirect"],
+    "redirect_uris": ["https://y-atproto-demo-monaco.wisp.place/"],
     "scope": "atproto repo:io.github.uwx.yjs.room repo:io.github.uwx.yjs.awareness repo:io.github.uwx.yjs.update",
     "grant_types": ["authorization_code", "refresh_token"],
     "response_types": ["code"],

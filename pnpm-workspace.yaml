@@ -1,6 +1,7 @@
+packages:
+  - demos/*
+
 overrides:
   '@typelex/cli': link:../../AppData/Local/pnpm/global/5/node_modules/@typelex/cli
   emitter: link:../../AppData/Local/pnpm/global/5/node_modules/@typelex/emitter
-
-packages:
-  - 'demos/*'
+  y-atproto: link:../../AppData/Local/pnpm/global/5/node_modules/y-atproto
