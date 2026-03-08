@@ -1,0 +1,12 @@
+{
+    "client_id": "https://y-atproto-demo-prosemirror.wisp.place/client-metadata.json",
+    "client_name": "atpaste",
+    "client_uri": "https://y-atproto-demo-prosemirror.wisp.place/",
+    "redirect_uris": ["https://y-atproto-demo-prosemirror.wisp.place/"],
+    "scope": "atproto repo:io.github.uwx.yjs.room repo:io.github.uwx.yjs.awareness repo:io.github.uwx.yjs.update",
+    "grant_types": ["authorization_code", "refresh_token"],
+    "response_types": ["code"],
+    "token_endpoint_auth_method": "none",
+    "application_type": "web",
+    "dpop_bound_access_tokens": true
+}

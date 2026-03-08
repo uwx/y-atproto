@@ -2,6 +2,8 @@ packages:
   - demos/*
 
 overrides:
-  '@typelex/cli': link:../../AppData/Local/pnpm/global/5/node_modules/@typelex/cli
+  '@typelex/cli': link:C:/Users/Maxine/AppData/Local/pnpm/global/5/node_modules/@typelex/cli
+  '@typelex/emitter': link:C:/Users/Maxine/AppData/Local/pnpm/global/5/node_modules/@typelex/emitter
   emitter: link:../../AppData/Local/pnpm/global/5/node_modules/@typelex/emitter
-  y-atproto: link:../../AppData/Local/pnpm/global/5/node_modules/y-atproto
+  kitty-agent: link:../kitty-agent
+  y-atproto: link:C:/Users/Maxine/AppData/Local/pnpm/global/5/node_modules/y-atproto

@@ -1,44 +1,57 @@
-import { Doc } from "yjs";
-import { MonacoBinding } from "y-monaco";
+import { createRoot } from "react-dom/client";
+import { EditorState } from "prosemirror-state";
+import {
+    ProseMirror,
+    ProseMirrorDoc,
+    reactKeys,
+} from "@handlewithcare/react-prosemirror";
 
-import { useEffect, useMemo, useState } from "react";
-import Editor from "@monaco-editor/react";
-import type { editor } from "monaco-editor";
-import { oauthClient, savedHandle, user } from "./atproto/signed-in-user";
+import { exampleSetup } from "prosemirror-example-setup";
+import { schema } from "prosemirror-schema-basic";
+import { keymap } from "prosemirror-keymap";
+import { baseKeymap } from "prosemirror-commands";
+
+import * as Y from "yjs";
+import {
+    ySyncPlugin,
+    yCursorPlugin,
+    yUndoPlugin,
+    undo,
+    redo,
+    initProseMirrorDoc,
+} from "y-prosemirror";
+
 import AtprotoProvider from "y-atproto";
-import type { ActorIdentifier, RecordKey } from "@atcute/lexicons";
+import { ActorIdentifier, RecordKey } from "@atcute/lexicons";
+import { useState, useMemo, useEffect } from "react";
+import { oauthClient, user, savedHandle } from "./atproto/signed-in-user";
 
-function EditorApp({ provider, ydoc }: { provider: AtprotoProvider, ydoc: Doc }) {
-    const [editor, setEditor] = useState<editor.IStandaloneCodeEditor | null>(null);
-    const [binding, setBinding] = useState<MonacoBinding | null>(null);
+function EditorApp({ provider, ydoc }: { provider: AtprotoProvider, ydoc: Y.Doc }) {
+    const yXmlFragment = ydoc.getXmlFragment("prosemirror");
+    const { doc, mapping } = initProseMirrorDoc(yXmlFragment, schema);
+    const defaultState = EditorState.create({
+        doc,
+        schema,
+        plugins: [
+            ySyncPlugin(yXmlFragment, { mapping }),
+            yCursorPlugin(provider.awareness),
+            yUndoPlugin(),
+            keymap({
+                "Mod-z": undo,
+                "Mod-y": redo,
+                "Mod-Shift-z": redo,
+            }),
+            keymap(baseKeymap),
+            reactKeys(),
+        ].concat(exampleSetup({ schema })),
+    });
 
-    // this effect manages the lifetime of the editor binding
-    useEffect(() => {
-        if (provider == null || editor == null) {
-            return;
-        }
-        console.log("reached", provider);
-        const binding = new MonacoBinding(
-            ydoc.getText(),
-            editor.getModel()!,
-            new Set([editor]),
-            provider?.awareness,
-        );
-        setBinding(binding);
-        return () => {
-            binding.destroy();
-        };
-    }, [ydoc, provider, editor]);
+    // window.example = { ydoc, provider, yXmlFragment, pmDoc: doc };
 
     return (
-        <Editor
-            height="90vh"
-            defaultValue="// some comment"
-            defaultLanguage="javascript"
-            onMount={(editor) => {
-                setEditor(editor);
-            }}
-        />
+        <ProseMirror defaultState={defaultState}>
+            <ProseMirrorDoc />
+        </ProseMirror>
     );
 }
 
@@ -47,7 +60,7 @@ function App() {
     const [provider, setProvider] = useState<AtprotoProvider | null>(null);
     const [room, setRoom] = useState<string | null>(null);
 
-    const ydoc = useMemo(() => new Doc(), []);
+    const ydoc = useMemo(() => new Y.Doc(), []);
 
     // this effect manages the lifetime of the Yjs document and the provider
     useEffect(() => {
@@ -163,4 +176,5 @@ function App() {
     );
 }
 
-export default App;
+const root = createRoot(document.getElementById("root")!);
+root.render(<App />);

@@ -4,8 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "npx esbuild --bundle index.jsx --serve --outdir=dist --servedir=."
+    "start": "vite"
   },
   "author": "",
   "license": "ISC",
@@ -24,7 +23,6 @@
     "prosemirror-schema-basic": "^1.2.3",
     "prosemirror-schema-list": "^1.5.0",
     "y-prosemirror": "^1.2.16",
-    "y-websocket": "^2.1.0",
     "yjs": "^13.6.23"
   }
 }
