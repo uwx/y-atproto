@@ -7,12 +7,6 @@ const _mainSchema = /*#__PURE__*/ v.record(
   /*#__PURE__*/ v.object({
     $type: /*#__PURE__*/ v.literal("io.github.uwx.yjs.mls.room"),
     /**
-     * If set, an allowlist of DIDs that are allowed to participate in this room
-     */
-    authorizedDids: /*#__PURE__*/ v.optional(
-      /*#__PURE__*/ v.array(/*#__PURE__*/ v.didString()),
-    ),
-    /**
      * The MLS ciphersuite identifier used by this group
      */
     cipherSuite: /*#__PURE__*/ v.string(),
@@ -24,10 +18,6 @@ const _mainSchema = /*#__PURE__*/ v.record(
      * The DID of the room creator, who is responsible for issuing MLS commits
      */
     creator: /*#__PURE__*/ v.didString(),
-    /**
-     * The serialized MLS GroupInfo with external pub and ratchet tree extensions, for external joins
-     */
-    groupInfo: /*#__PURE__*/ v.optional(/*#__PURE__*/ v.bytes()),
   }),
 );
 

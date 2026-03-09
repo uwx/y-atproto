@@ -18,21 +18,9 @@
             "format": "did",
             "description": "The DID of the room creator, who is responsible for issuing MLS commits"
           },
-          "authorizedDids": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "did"
-            },
-            "description": "If set, an allowlist of DIDs that are allowed to participate in this room"
-          },
           "cipherSuite": {
             "type": "string",
             "description": "The MLS ciphersuite identifier used by this group"
-          },
-          "groupInfo": {
-            "type": "bytes",
-            "description": "The serialized MLS GroupInfo with external pub and ratchet tree extensions, for external joins"
           }
         },
         "required": [

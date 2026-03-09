@@ -59,17 +59,16 @@ import {
     type MlsPublicMessage,
     type ProcessMessageResult,
     type Proposal,
-    type GroupInfo,
     type PrivateMessage,
+    type Welcome,
     createGroup,
-    joinGroupExternal,
+    joinGroup,
     createCommit,
     createApplicationMessage,
     processMessage,
     generateKeyPackage,
     getCiphersuiteFromName,
     getCiphersuiteImpl,
-    createGroupInfoWithExternalPubAndRatchetTree,
     encodeMlsMessage,
     decodeMlsMessage,
     encodeGroupState,
@@ -327,13 +326,6 @@ export default class MlsAtprotoProvider extends ObservableV2<{
                 const commit = event.commit;
                 if (commit.operation !== "create") continue;
 
-                if (
-                    record.authorizedDids != null &&
-                    !record.authorizedDids.includes(event.did)
-                ) {
-                    continue;
-                }
-
                 if (commit.collection === "io.github.uwx.yjs.mls.message") {
                     const mlsRecord = commit.record;
                     if (
@@ -408,6 +400,36 @@ export default class MlsAtprotoProvider extends ObservableV2<{
     }
 
     /**
+     * Bootstrap MLS credentials for this user. Creates a credential and key package,
+     * stores private keys locally, and publishes a pool of key packages to the repo
+     * so that room creators can add this user via addMember().
+     *
+     * Call this once before joining any rooms.
+     */
+    static async bootstrap({
+        repo,
+        did,
+        handler,
+        ciphersuiteName,
+    }: {
+        repo: ActorIdentifier;
+        did: Did;
+        handler: FetchHandler | FetchHandlerObject | KittyAgent;
+        ciphersuiteName?: CiphersuiteName;
+    }) {
+        const csName = ciphersuiteName ?? DEFAULT_CIPHERSUITE;
+        const cs = await getCiphersuiteImpl(getCiphersuiteFromName(csName));
+        const credential = makeCredential(did);
+
+        const agent =
+            handler instanceof KittyAgent
+                ? handler
+                : new KittyAgent({ handler });
+
+        await publishKeyPackagePool(agent, repo, credential, cs);
+    }
+
+    /**
      * Create a new MLS-encrypted room. The caller becomes the room creator
      * (sole committer for MLS group operations).
      */
@@ -423,7 +445,6 @@ export default class MlsAtprotoProvider extends ObservableV2<{
         awareness,
         awarenessLive,
         ciphersuiteName,
-        authorizedDids,
     }: {
         repo: ActorIdentifier;
         did: Did;
@@ -436,7 +457,6 @@ export default class MlsAtprotoProvider extends ObservableV2<{
         awareness?: Awareness;
         awarenessLive?: boolean;
         ciphersuiteName?: CiphersuiteName;
-        authorizedDids?: Did[];
     }) {
         const csName = ciphersuiteName ?? DEFAULT_CIPHERSUITE;
         const cs = await getCiphersuiteImpl(getCiphersuiteFromName(csName));
@@ -472,27 +492,12 @@ export default class MlsAtprotoProvider extends ObservableV2<{
                 ? handler
                 : new KittyAgent({ handler });
 
-        // Publish GroupInfo with external pub so others can join
-        const groupInfo =
-            await createGroupInfoWithExternalPubAndRatchetTree(
-                mlsState,
-                [],
-                cs,
-            );
-        const groupInfoBytes = encodeMlsMessage({
-            version: "mls10",
-            wireformat: "mls_group_info",
-            groupInfo,
-        });
-
         // Create room record
         const record = {
             $type: "io.github.uwx.yjs.mls.room" as const,
             createdAt: new Date().toISOString(),
             creator: did,
             cipherSuite: csName,
-            authorizedDids,
-            groupInfo: { $bytes: fromUint8Array(groupInfoBytes) },
         } satisfies IoGithubUwxYjsMlsRoom.Main;
 
         await agent.create({
@@ -650,15 +655,12 @@ export default class MlsAtprotoProvider extends ObservableV2<{
                 : new KittyAgent({ handler });
 
         if (mlsState == null) {
-            // No cached state — need to join the group
-            mlsState = await joinViaGroupInfo(
-                record.value,
+            // No cached state — scan backlinks for a Welcome addressed to us
+            mlsState = await joinViaWelcome(
                 room,
                 cs,
                 keyPackage,
                 privateKeyPackage,
-                agent,
-                repo,
             );
         }
 
@@ -668,7 +670,6 @@ export default class MlsAtprotoProvider extends ObservableV2<{
             mlsState,
             cs,
             lastProcessedTid,
-            record.value.authorizedDids,
         );
         mlsState = replay.state;
         lastProcessedTid = replay.lastProcessedTid ?? lastProcessedTid;
@@ -797,9 +798,6 @@ export default class MlsAtprotoProvider extends ObservableV2<{
             });
         }
 
-        // Update GroupInfo on the room record so new joiners can still external-join
-        await this.updateGroupInfo();
-
         this.emit("mls:member-added", [memberDid]);
         this.emit("mls:epoch-advanced", [this.mlsState.groupContext.epoch]);
     }
@@ -854,8 +852,6 @@ export default class MlsAtprotoProvider extends ObservableV2<{
             repo: this.repo,
         });
         this.lastProcessedTid = commitTid;
-
-        await this.updateGroupInfo();
 
         this.emit("mls:member-removed", [memberDid]);
         this.emit("mls:epoch-advanced", [this.mlsState.groupContext.epoch]);
@@ -1062,101 +1058,57 @@ export default class MlsAtprotoProvider extends ObservableV2<{
         });
     }
 
-    /**
-     * Update the GroupInfo on the room record so new members can external-join.
-     */
-    private async updateGroupInfo() {
-        const groupInfo =
-            await createGroupInfoWithExternalPubAndRatchetTree(
-                this.mlsState,
-                [],
-                this.cs,
-            );
-        const groupInfoBytes = encodeMlsMessage({
-            version: "mls10",
-            wireformat: "mls_group_info",
-            groupInfo,
-        });
-
-        const parsedUri = parseResourceUri(this.room);
-        if (!parsedUri.ok) return;
-
-        await this.agent.put({
-            collection: "io.github.uwx.yjs.mls.room",
-            record: {
-                $type: "io.github.uwx.yjs.mls.room" as const,
-                createdAt: new Date().toISOString(),
-                creator: this.did,
-                cipherSuite: this.cs.name,
-                groupInfo: { $bytes: fromUint8Array(groupInfoBytes) },
-            } satisfies IoGithubUwxYjsMlsRoom.Main,
-            rkey: parsedUri.value.rkey as RecordKey,
-            repo: this.repo,
-        });
-    }
 }
 
 // -------- Helper functions --------
 
 /**
- * Join a group via the GroupInfo published on the room record (external join).
- * Publishes the external join commit as an MLS message.
+ * Join a group by scanning backlinks for a Welcome message addressed to us.
+ * The creator publishes a Welcome when they add a member via addMember().
  */
-async function joinViaGroupInfo(
-    record: IoGithubUwxYjsMlsRoom.Main,
+async function joinViaWelcome(
     room: ResourceUri,
     cs: CiphersuiteImpl,
     keyPackage: KeyPackage,
     privateKeyPackage: PrivateKeyPackage,
-    agent: KittyAgent,
-    repo: ActorIdentifier,
 ): Promise<ClientState> {
-    if (record.groupInfo == null) {
-        throw new Error("Room has no GroupInfo — cannot join");
-    }
-
-    const groupInfoMsg = tryDecodeMlsMessage(
-        toUint8Array(record.groupInfo.$bytes),
-    );
-    if (groupInfoMsg == null || groupInfoMsg.wireformat !== "mls_group_info") {
-        throw new Error("Failed to decode GroupInfo");
-    }
-
-    // Extract the GroupInfo from the MLS message envelope
-    const groupInfo = (groupInfoMsg as { groupInfo: GroupInfo }).groupInfo;
-
-    const result = await joinGroupExternal(
-        groupInfo,
-        keyPackage,
-        privateKeyPackage,
-        false,
-        cs,
-    );
-
-    // Publish the external join as a public message (commit)
-    const commitBytes = encodeMlsMessage({
-        version: "mls10",
-        wireformat: "mls_public_message",
-        publicMessage: result.publicMessage,
+    const iter = constellation.getAllBacklinks({
+        subject: room,
+        source: "io.github.uwx.yjs.mls.message:room",
     });
 
-    await agent.put({
-        collection: "io.github.uwx.yjs.mls.message",
-        record: {
-            $type: "io.github.uwx.yjs.mls.message" as const,
-            room,
-            messageType: "commit",
-            message: {
-                $type: "io.github.uwx.yjs.mls.message#bytesMessageData" as const,
-                bytes: { $bytes: fromUint8Array(commitBytes) },
-            },
-            epoch: Number(result.newState.groupContext.epoch),
-        } satisfies IoGithubUwxYjsMlsMessage.Main,
-        rkey: tidNow(),
-        repo,
-    });
+    for await (const link of iter) {
+        const { value: record } = await slingshot.tryGetRecord({
+            collection: "io.github.uwx.yjs.mls.message",
+            rkey: link.rkey,
+            repo: link.did,
+        });
+        if (record == null) continue;
+        if (record.room !== room) continue;
+        if (record.messageType !== "welcome") continue;
 
-    return result.newState;
+        const messageBytes = await getMessageData(link.did, record);
+        const mlsMsg = tryDecodeMlsMessage(messageBytes);
+        if (mlsMsg == null || mlsMsg.wireformat !== "mls_welcome") continue;
+
+        const welcome = (mlsMsg as { welcome: Welcome }).welcome;
+
+        try {
+            const state = await joinGroup(
+                welcome,
+                keyPackage,
+                privateKeyPackage,
+                emptyPskIndex,
+                cs,
+            );
+            return { ...state, clientConfig: defaultClientConfig };
+        } catch {
+            // This Welcome wasn't for us — try the next one
+            continue;
+        }
+    }
+
+    throw new Error("No Welcome message found — have you been added to the room?");
 }
 
 /**
@@ -1173,7 +1125,6 @@ async function unifiedReplay(
     initialState: ClientState,
     cs: CiphersuiteImpl,
     sinceMessageTid?: string,
-    authorizedDids?: Did[],
 ): Promise<{
     state: ClientState;
     yjsUpdates: Uint8Array[];
@@ -1196,10 +1147,6 @@ async function unifiedReplay(
     let checkpointCutoffTimestamp: number | undefined;
 
     for await (const link of iter) {
-        if (authorizedDids != null && !authorizedDids.includes(link.did)) {
-            continue;
-        }
-
         // Stop at messages we've already processed (from local IndexedDB)
         if (sinceMessageTid != null) {
             const linkTime = parseTid(link.rkey).timestamp;

@@ -65,14 +65,8 @@ namespace io.github.uwx.yjs.mls.room {
     /** The DID of the room creator, who is responsible for issuing MLS commits */
     @required creator: did;
 
-    /** If set, an allowlist of DIDs that are allowed to participate in this room */
-    authorizedDids?: did[];
-
     /** The MLS ciphersuite identifier used by this group */
     @required cipherSuite: string;
-
-    /** The serialized MLS GroupInfo with external pub and ratchet tree extensions, for external joins */
-    groupInfo?: bytes;
   }
 }
 
