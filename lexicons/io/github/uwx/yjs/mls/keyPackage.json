@@ -1,0 +1,33 @@
+{
+  "lexicon": 1,
+  "id": "io.github.uwx.yjs.mls.keyPackage",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "When this key package was created"
+          },
+          "keyPackage": {
+            "type": "bytes",
+            "description": "The serialized MLS KeyPackage message"
+          },
+          "lastResort": {
+            "type": "boolean",
+            "description": "Whether this is a last-resort key package that should not be consumed except when no others are available"
+          }
+        },
+        "required": [
+          "createdAt",
+          "keyPackage"
+        ]
+      },
+      "description": "A published MLS KeyPackage for out-of-band group joining"
+    }
+  }
+}

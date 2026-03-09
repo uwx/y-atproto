@@ -1,0 +1,94 @@
+{
+  "lexicon": 1,
+  "id": "io.github.uwx.yjs.mls.message",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "record": {
+        "type": "object",
+        "properties": {
+          "room": {
+            "type": "string",
+            "format": "at-uri",
+            "description": "The room this message belongs to"
+          },
+          "messageType": {
+            "type": "ref",
+            "ref": "#messageType",
+            "description": "The type of MLS message"
+          },
+          "message": {
+            "type": "union",
+            "refs": [
+              "#bytesMessageData",
+              "#blobMessageData"
+            ],
+            "description": "The serialized MLS message payload"
+          },
+          "epoch": {
+            "type": "integer",
+            "description": "The MLS epoch this message belongs to"
+          },
+          "isFullUpdate": {
+            "type": "boolean",
+            "description": "Whether this is a full state update (only for messageType \"update\")"
+          },
+          "checkpointState": {
+            "type": "bytes",
+            "description": "The serialized MLS ClientState (only for messageType \"checkpoint\")"
+          },
+          "lastMessageTid": {
+            "type": "string",
+            "format": "tid",
+            "description": "The TID of the last processed message when this checkpoint was created (only for messageType \"checkpoint\")"
+          }
+        },
+        "required": [
+          "room",
+          "messageType",
+          "message",
+          "epoch"
+        ]
+      },
+      "description": "An MLS message scoped to a room. All data (handshake, updates, awareness, checkpoints) flows through this single collection."
+    },
+    "bytesMessageData": {
+      "type": "object",
+      "properties": {
+        "bytes": {
+          "type": "bytes"
+        }
+      },
+      "description": "The message data as inline bytes",
+      "required": [
+        "bytes"
+      ]
+    },
+    "blobMessageData": {
+      "type": "object",
+      "properties": {
+        "blob": {
+          "type": "blob"
+        }
+      },
+      "description": "The message data as a blob reference",
+      "required": [
+        "blob"
+      ]
+    },
+    "messageType": {
+      "type": "string",
+      "knownValues": [
+        "welcome",
+        "commit",
+        "proposal",
+        "application",
+        "update",
+        "awareness",
+        "checkpoint"
+      ],
+      "description": "The type of MLS message"
+    }
+  }
+}

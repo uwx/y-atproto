@@ -30,7 +30,7 @@ import { decrypt, deriveKey, encrypt } from "./crypto.js";
 import { applyAwarenessUpdate, Awareness, encodeAwarenessUpdate, outdatedTimeout } from 'y-protocols/awareness.js'
 import { createModuleLogger } from 'lib0/logging';
 
-const log = createModuleLogger('y-webrtc')
+const log = createModuleLogger('y-atproto');
 
 const constellation = new ConstellationClient({
     userAgent: "y-atproto/1.0.0",
@@ -44,7 +44,7 @@ async function getUpdateData(
     actor: ActorIdentifier,
     record: IoGithubUwxYjsUpdate.Main,
 ) {
-    if (record.update.$type == "io.github.uwx.yjs.update#blobUpdateData") {
+    if (record.update.$type === "io.github.uwx.yjs.update#blobUpdateData") {
         const { did, pds } = await getDidAndPds(actor);
         const agent = KittyAgent.createUnauthed(pds);
         const cid = isLegacyBlob(record.update.blob)
@@ -56,8 +56,10 @@ async function getUpdateData(
         });
 
         return blobData;
-    } else if (
-        record.update.$type == "io.github.uwx.yjs.update#bytesUpdateData"
+    }
+
+    if (
+        record.update.$type === "io.github.uwx.yjs.update#bytesUpdateData"
     ) {
         return toUint8Array(record.update.bytes.$bytes);
     }
@@ -181,7 +183,7 @@ export default class AtprotoProvider extends ObservableV2<{
     readonly ydoc: Doc;
     readonly resendAllUpdates: boolean;
     readonly queuedYjsUpdates: Uint8Array[];
-    readonly autosaveLoop: number;
+    readonly autosaveLoop: number | NodeJS.Timeout;
     readonly jetstream: JetstreamSubscription;
     readonly room: ResourceUri;
     readonly agent: KittyAgent;
@@ -190,7 +192,7 @@ export default class AtprotoProvider extends ObservableV2<{
     readonly fullUpdateRate: number;
     readonly key: CryptoKey | undefined;
     readonly awareness: Awareness;
-    readonly awarenessBroadcastLoop?: number;
+    readonly awarenessBroadcastLoop?: number | NodeJS.Timeout;
 
     private constructor({
         key,
@@ -489,7 +491,7 @@ export default class AtprotoProvider extends ObservableV2<{
 
         log("Syncing to chat peers");
 
-        let mergedYjsUpdate;
+        let mergedYjsUpdate: Uint8Array;
 
         const doFullUpdate =
             fullUpdate ||
