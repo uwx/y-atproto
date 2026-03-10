@@ -67,6 +67,7 @@ const provider = await AtprotoProvider.resume({
 
 - **demos/monaco-react** -- Collaborative Monaco editor.
 - **demos/react-prosemirror** -- Collaborative ProseMirror editor.
+- **demos/excalidraw** -- Collaborative whiteboard using Excalidraw.
 
 ## Building
 
