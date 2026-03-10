@@ -11,7 +11,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { oauthClient, useUser, useSavedHandle } from "./atproto/signed-in-user";
 
 import * as random from "lib0/random";
-import { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
+import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 const usercolors = [
     { color: "#30bced", light: "#30bced33" },
