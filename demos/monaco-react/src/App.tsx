@@ -7,6 +7,7 @@ import type { editor } from "monaco-editor";
 import { oauthClient, savedHandle, user } from "./atproto/signed-in-user";
 import AtprotoProvider from "y-atproto";
 import type { ActorIdentifier, RecordKey } from "@atcute/lexicons";
+import { useSignals } from "@preact/signals-react/runtime";
 
 function EditorApp({ provider, ydoc }: { provider: AtprotoProvider, ydoc: Doc }) {
     const [editor, setEditor] = useState<editor.IStandaloneCodeEditor | null>(null);
@@ -43,6 +44,8 @@ function EditorApp({ provider, ydoc }: { provider: AtprotoProvider, ydoc: Doc })
 }
 
 function App() {
+    useSignals();
+
     const [hasInitialSession, setHasInitialSession] = useState(false);
     const [provider, setProvider] = useState<AtprotoProvider | null>(null);
     const [room, setRoom] = useState<string | null>(null);
@@ -134,7 +137,7 @@ function App() {
             .then(() => setHasInitialSession(true))
             .finally(async () => {
                 console.log("Finalizing authorization");
-                if (!user.value) {
+                if (!user.value && hash) {
                     await oauthClient.finalizeAuthorization(
                         new URLSearchParams(hash),
                     );

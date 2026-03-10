@@ -22,9 +22,10 @@ import {
 } from "y-prosemirror";
 
 import AtprotoProvider from "y-atproto";
-import { ActorIdentifier, RecordKey } from "@atcute/lexicons";
+import type { ActorIdentifier, RecordKey } from "@atcute/lexicons";
 import { useState, useMemo, useEffect } from "react";
 import { oauthClient, user, savedHandle } from "./atproto/signed-in-user";
+import { useSignals } from "@preact/signals-react/runtime";
 
 function EditorApp({ provider, ydoc }: { provider: AtprotoProvider, ydoc: Y.Doc }) {
     const yXmlFragment = ydoc.getXmlFragment("prosemirror");
@@ -56,6 +57,8 @@ function EditorApp({ provider, ydoc }: { provider: AtprotoProvider, ydoc: Y.Doc 
 }
 
 function App() {
+    useSignals();
+    
     const [hasInitialSession, setHasInitialSession] = useState(false);
     const [provider, setProvider] = useState<AtprotoProvider | null>(null);
     const [room, setRoom] = useState<string | null>(null);
@@ -147,7 +150,7 @@ function App() {
             .then(() => setHasInitialSession(true))
             .finally(async () => {
                 console.log("Finalizing authorization");
-                if (!user.value) {
+                if (!user.value && hash) {
                     await oauthClient.finalizeAuthorization(
                         new URLSearchParams(hash),
                     );

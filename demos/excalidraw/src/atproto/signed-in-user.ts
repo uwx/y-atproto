@@ -1,10 +1,10 @@
-import { StatefulPreactOAuthClient } from "kitty-agent/oauth-preact";
+import { StatefulReactOAuthClient, useUser as _useUser, useHandle as _useHandle } from "kitty-agent/oauth-react";
 import { YClient } from "./client";
-import { computed, signal } from "@preact/signals-react";
 
 import metadata from '../../client-metadata.json' with { type: 'json' };
+import { useSyncExternalStore } from "react";
 
-export const oauthClient = new StatefulPreactOAuthClient<YClient>(
+export const oauthClient = new StatefulReactOAuthClient<YClient>(
     {
         clientId: document.location.hostname === '127.0.0.1' || document.location.hostname === 'localhost'
             ? `http://localhost?redirect_uri=${encodeURIComponent(`http://127.0.0.1:${document.location.port}/`)}` +
@@ -15,12 +15,9 @@ export const oauthClient = new StatefulPreactOAuthClient<YClient>(
             : metadata.redirect_uris[0],
         scope: metadata.scope,
     },
-    {
-        computed,
-        signal,
-    },
+    useSyncExternalStore,
     (loginState) => new YClient(loginState),
 );
 
-export const user = oauthClient.user;
-export const savedHandle = oauthClient.handle;
+export const useUser = () => _useUser(oauthClient);
+export const useSavedHandle = () => _useHandle(oauthClient);

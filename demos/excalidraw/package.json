@@ -1,0 +1,24 @@
+{
+  "name": "excalidraw",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "vite"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "vite": "^7.3.1"
+  },
+  "dependencies": {
+    "@excalidraw/excalidraw": "0.18.0-c1dbbdf",
+    "@preact/signals-react": "^3.9.1",
+    "y-excalidraw": "^2.0.12",
+    "yjs": "^13.6.23"
+  }
+}

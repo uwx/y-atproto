@@ -1,6 +1,6 @@
 import { StatefulPreactOAuthClient } from "kitty-agent/oauth-preact";
 import { YClient } from "./client";
-import { computed, signal } from "@preact/signals";
+import { computed, signal } from "@preact/signals-react";
 
 import metadata from '../../client-metadata.json' with { type: 'json' };
 
