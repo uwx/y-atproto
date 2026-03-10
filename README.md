@@ -65,7 +65,7 @@ const provider = await AtprotoProvider.resume({
 
 ## Demos
 
-- **demos/monaco-react** -- Collaborative Monaco editor with AT Protocol OAuth sign-in.
+- **demos/monaco-react** -- Collaborative Monaco editor.
 - **demos/react-prosemirror** -- Collaborative ProseMirror editor.
 
 ## Building
