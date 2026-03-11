@@ -1,7 +1,7 @@
 import { StatefulReactOAuthClient, useUser as _useUser, useHandle as _useHandle } from "kitty-agent/oauth-react";
 import { YClient } from "./client";
 
-import metadata from '../../client-metadata.json' with { type: 'json' };
+import metadata from '../../public/client-metadata.json' with { type: 'json' };
 import { useSyncExternalStore } from "react";
 
 export const oauthClient = new StatefulReactOAuthClient<YClient>(

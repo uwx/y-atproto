@@ -10,6 +10,7 @@ overrides:
   emitter: link:../../AppData/Local/pnpm/global/5/node_modules/@typelex/emitter
   kitty-agent: link:../kitty-agent
   y-atproto: link:C:/Users/Maxine/AppData/Local/pnpm/global/5/node_modules/y-atproto
+  wispctl: link:C:/Users/Maxine/AppData/Local/pnpm/global/5/node_modules/wispctl
 
 importers:
 
@@ -42,6 +43,9 @@ importers:
       lib0:
         specifier: ^0.2.117
         version: 0.2.117
+      wispctl:
+        specifier: link:C:/Users/Maxine/AppData/Local/pnpm/global/5/node_modules/wispctl
+        version: link:C:/Users/Maxine/AppData/Local/pnpm/global/5/node_modules/wispctl
       y-atproto:
         specifier: link:C:/Users/Maxine/AppData/Local/pnpm/global/5/node_modules/y-atproto
         version: link:C:/Users/Maxine/AppData/Local/pnpm/global/5/node_modules/y-atproto

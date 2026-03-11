@@ -7,7 +7,12 @@
     "scripts": {
         "build:typelex": "typelex compile io.github.uwx.yjs.*",
         "build:lex": "lex-cli generate",
-        "build": "pnpm build:typelex && pnpm build:lex && tsc"
+        "build:demos": "pnpm -r build",
+        "build": "pnpm build:typelex && pnpm build:lex && tsc && pnpm build:demos",
+        "deploy:demo-excalidraw": "wispctl deploy maxine.puppykitty.racing -p demos/excalidraw/dist -s y-atproto-demo-excalidraw --store \".wisp-store\"",
+        "deploy:demo-monaco": "wispctl deploy maxine.puppykitty.racing -p demos/monaco-react/dist -s y-atproto-demo-monaco --store \".wisp-store\"",
+        "deploy:demo-prosemirror": "wispctl deploy maxine.puppykitty.racing -p demos/react-prosemirror/dist -s y-atproto-demo-prosemirror --store \".wisp-store\"",
+        "deploy:demos": "pnpm build:demos && pnpm deploy:demo-excalidraw && pnpm deploy:demo-monaco && pnpm deploy:demo-prosemirror"
     },
     "devDependencies": {
         "@atcute/lex-cli": "^2.5.3",

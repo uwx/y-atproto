@@ -2,7 +2,8 @@
   "name": "playground",
   "version": "1.0.0",
   "scripts": {
-    "start": "vite"
+    "start": "vite",
+    "build": "vite build"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

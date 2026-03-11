@@ -65,9 +65,9 @@ const provider = await AtprotoProvider.resume({
 
 ## Demos
 
-- **demos/monaco-react** -- Collaborative Monaco editor.
-- **demos/react-prosemirror** -- Collaborative ProseMirror editor.
-- **demos/excalidraw** -- Collaborative whiteboard using Excalidraw.
+- **demos/monaco-react** -- Collaborative Monaco editor. Live at [y-atproto-demo-monaco.wisp.place](https://y-atproto-demo-monaco.wisp.place)
+- **demos/react-prosemirror** -- Collaborative ProseMirror editor. Live at [y-atproto-demo-prosemirror.wisp.place](https://y-atproto-demo-prosemirror.wisp.place)
+- **demos/excalidraw** -- Collaborative whiteboard using Excalidraw. Live at [y-atproto-demo-excalidraw.wisp.place](https://y-atproto-demo-excalidraw.wisp.place)
 
 ## Building
 

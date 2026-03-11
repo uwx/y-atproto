@@ -4,6 +4,6 @@ packages:
 overrides:
   '@typelex/cli': link:C:/Users/Maxine/AppData/Local/pnpm/global/5/node_modules/@typelex/cli
   '@typelex/emitter': link:C:/Users/Maxine/AppData/Local/pnpm/global/5/node_modules/@typelex/emitter
-  emitter: link:../../AppData/Local/pnpm/global/5/node_modules/@typelex/emitter
   kitty-agent: link:../kitty-agent
+  wispctl: link:C:/Users/Maxine/AppData/Local/pnpm/global/5/node_modules/wispctl
   y-atproto: link:C:/Users/Maxine/AppData/Local/pnpm/global/5/node_modules/y-atproto
