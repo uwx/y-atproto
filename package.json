@@ -4,6 +4,7 @@
     "license": "MIT",
     "version": "1.0.0",
     "main": "out/index.js",
+    "types": "out/index.d.ts",
     "scripts": {
         "build:typelex": "typelex compile io.github.uwx.yjs.*",
         "build:lex": "lex-cli generate",
